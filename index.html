@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<script src='https://api.tiles.mapbox.com/mapbox-gl-js/v0.38.0/mapbox-gl.js'></script>
+	<link href='https://api.tiles.mapbox.com/mapbox-gl-js/v0.39.1/mapbox-gl.css' rel='stylesheet' />
+	<style>
+		body {
+			background: #404040;
+			color: #f8f8f8;
+			font: 500 20px/26px 'Helvetica Neue', Helvetica, Arial, Sans-serif;
+			margin: 0;
+			padding: 0;
+			-webkit-font-smoothing: antialiased;
+		}
+
+		/* The page is split between map and sidebar*/
+		.sidebar {
+			position: absolute;
+		    width: 25%;
+		    top: 0;
+		    bottom: 0;
+		    left: 0;
+		    font: 14px/20px 'Helvetica Neue', Arial, Helvetica, sans-serif;
+		    background-color: #fff;
+		    max-height: 100%;
+		    overflow: hidden;
+		}
+
+		.map {
+			border-left: 1px solid #fff;
+			position: absolute;
+			left: 25%;
+			width: 75%;
+			top: 0;
+			bottom: 0;
+		}
+
+		.pad2 {
+			padding: 20px;
+			-webkit-box-sizing: border-box;
+			-moz-box-sizing: border-box;
+			box-sizing: border-box;
+		}
+
+		.sidebar .listing {
+		    overflow: auto;
+		    max-height: 100%;
+		}
+
+		.sidebar .listing > * {
+		    display: block;
+		    padding: 5px 10px;
+		    margin: 0;
+		}
+
+		.sidebar .listing p {
+		    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+		    color: #404;
+		    text-decoration: none;
+		    white-space: pre-line;
+		}
+
+		.sidebar .listing p#summitted {
+			font-weight: bold;
+			color: #aa0000;
+		}
+
+		.sidebar .listing p:last-child {
+		    border: none;
+		}
+
+		.sidebar .listing p:hover {
+		    background: #f0f0f0;
+		}
+
+		.mapboxgl-popup {
+        	min-width: 100px;
+        	font: 12px/20px 'Helvetica Neue', Arial, Helvetica, sans-serif;
+        	color: black;
+    	}
+
+		</style>
+</head>
+
+<body>
+	<div class='sidebar'>
+		<div id='feature-listing' class='listing'></div>
+	</div>
+	<div id='map' class='map'></div>
+	<script>
+
+		function numberWithCommas(x) {
+		    return x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+		}
+
+		function alphaPeakSort(a,b) {
+			if (a.properties.Peak < b.properties.Peak)
+				return -1;
+			if (a.properties.Peak > b.properties.Peak)
+				return 1;
+			return 0;
+		}
+
+		mapboxgl.accessToken = 'pk.eyJ1Ijoic2NvbW91IiwiYSI6ImNqNzVoMHZjdjE4cWszMm9jbXhzd3E3Y3EifQ.9dZpgGHVN3RoYxeVXWie4A';
+		// this adds the map to your page
+		var map = new mapboxgl.Map({
+			// container id specified in the HTML
+			container: 'map',
+			// style URL
+			style: 'mapbox://styles/scomou/cj75h8cm44fif2so5892vx2bv',
+			// initial position in [lon, lat] format
+			center: [-71.5, 44.2],
+			// initial zoom
+			zoom: 9,
+			// max and min zoom levels
+			maxZoom: 12,
+			minZoom:9,
+			// set panning boundaries [lng,lat] southwest, northeast
+			maxBounds: [[-72.1918597, 43.8157745],
+						[-70.8130755, 44.5827142]]
+		});
+
+		// Create a popup, but don't add it to the map yet.
+		var popup = new mapboxgl.Popup({
+			closeButton: false
+		});
+
+		var listingEl = document.getElementById('feature-listing');
+			//filterEl = document.getElementById('feature-filter');
+
+		var peakCounter = document.getElementById('peak-counter');
+
+		function renderListings(features) {
+		    // Clear any existing listings
+		    listingEl.innerHTML = '';
+		    if (features.length) {
+		        features.forEach(function(feature) {
+		            var prop = feature.properties;
+		            if (prop.SummitDate != '') {
+		            	var item = document.createElement('p')
+		            	item.id = 'summitted'
+		            } else {
+		            	var item = document.createElement('p')
+		            }
+
+		            // newline char works with 'white-space: pre-line' styling
+		            item.textContent = prop.Peak + ' - ' + numberWithCommas(prop.Elevation) + ' ft.\n' + prop.SummitDate;
+		            item.addEventListener('mouseover', function() {
+		                // Highlight corresponding feature on the map
+		                popup.setLngLat(feature.geometry.coordinates)
+		                    .setHTML(prop.Peak + "<br>" + 
+		                    	numberWithCommas(prop.Elevation) + " ft.<br>" + 
+		                    	prop.SummitDate)
+		                    .addTo(map);
+		            });
+		            item.addEventListener('mouseleave', function() {
+		            	popup.remove();
+		            });
+		            listingEl.appendChild(item);
+		        });
+
+		    } else {
+		        var empty = document.createElement('p');
+		        empty.textContent = 'Drag the map to populate results';
+		        listingEl.appendChild(empty);
+		    }
+
+		};
+
+		function getUniqueFeatures(array, comparatorProperty) {
+		    var existingFeatureKeys = {};
+		    // Because features come from tiled vector data, feature geometries may be split
+		    // or duplicated across tile boundaries and, as a result, features may appear
+		    // multiple times in query results.
+		    var uniqueFeatures = array.filter(function(el) {
+		        if (existingFeatureKeys[el.properties[comparatorProperty]]) {
+		            return false;
+		        } else {
+		            existingFeatureKeys[el.properties[comparatorProperty]] = true;
+		            return true;
+		        }
+		    });
+
+		    return uniqueFeatures;
+		}
+
+		map.on('load', function() {
+
+			// add geojson source containing peak coordinates and properties
+			map.addSource('peaks', {
+				type: 'geojson',
+				data: 'json/wmnf_peaks_4k.geojson'
+			});
+
+			// add data to map as layer based off 'peaks' source
+			map.addLayer({
+				id: 'peaks',
+				type: 'circle',
+				source: 'peaks',
+				paint: {
+					// Style color based on climbed/not using inverted logic, default captures
+					// updated values while stop captures unclimbed with blank text ''
+					'circle-color': {
+						property: 'SummitDate',
+						type: 'categorical',
+						stops: [
+							['', '#888888']],
+						default: '#aa0000'
+					},
+					// differentiate 48 designated 4k footers with stroke, all 63 peaks
+					// symbolized are higher than 4k
+					'circle-stroke-width': {
+						property: 'Designated',
+						type: 'categorical',
+						stops: [
+							['Yes', 1.5],
+							['No', 0.8]]
+					},
+					'circle-stroke-color': {
+						property: 'Designated',
+						type: 'categorical',
+						stops: [
+							['Yes', 'black'],
+							['No', 'white']]
+					}
+				}
+			});
+
+			map.on('moveend', function() {
+		        var features = map.queryRenderedFeatures({layers:['peaks']});
+
+		        if (features) {
+		        	var uniqueFeatures = getUniqueFeatures(features, "Peak");
+		        	var sortedFeatures = uniqueFeatures.sort(alphaPeakSort)
+		            // Populate features for the listing overlay.
+		            renderListings(sortedFeatures);
+		        }
+		    });
+
+    		// When a click event occurs on a feature in the places layer, open a popup at the
+		    // location of the feature, with description HTML from its properties.
+    		// Change the cursor to a pointer when the mouse is over the peaks layer.
+		    map.on('mousemove', 'peaks', function (e) {
+		        map.getCanvas().style.cursor = 'pointer';
+
+		        var peak = e.features[0].properties.Peak,
+		        	elev = numberWithCommas(e.features[0].properties.Elevation) + " ft.",
+		        	summit = e.features[0].properties.SummitDate;
+
+		        var display_info = peak + "<br>"
+		        					+ elev + "<br>"
+		        					+ summit;					
+
+		        popup.setLngLat(e.features[0].geometry.coordinates)
+		            .setHTML(display_info)
+		            .addTo(map);
+		    });
+
+		    // Change it back to a pointer when it leaves.
+		    map.on('mouseleave', 'peaks', function () {
+		        map.getCanvas().style.cursor = '';
+		        popup.remove();
+		    });
+
+		    // Call this function on initialization
+		    // passing an empty array to render an empty state
+		    renderListings([]);
+
+
+		});
+
+	</script>
+</body>
+</html>
